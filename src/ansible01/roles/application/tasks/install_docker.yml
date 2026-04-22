@@ -1,0 +1,55 @@
+---
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: yes
+    force_apt_get: yes
+
+- name: Install required dependencies for Docker script
+  ansible.builtin.apt:
+    name:
+      - curl
+      - gnupg
+      - apt-transport-https
+      - ca-certificates
+      - software-properties-common
+    state: present
+
+- name: Install Docker using official script
+  ansible.builtin.shell:
+    cmd: |
+      curl -fsSL https://get.docker.com -o get-docker.sh
+      sh get-docker.sh
+  args:
+    creates: /usr/bin/docker
+
+- name: Install Docker Compose plugin
+  ansible.builtin.apt:
+    name: docker-compose-plugin
+    state: present
+  ignore_errors: yes
+
+- name: Add user to docker group
+  ansible.builtin.user:
+    name: "{{ ansible_user }}"
+    groups: docker
+    append: yes
+
+- name: Start and enable Docker service
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: yes
+
+- name: Install Docker Python SDK
+  ansible.builtin.pip:
+    name: docker
+    state: present
+
+- name: Verify Docker installation
+  ansible.builtin.shell:
+    cmd: docker --version
+  register: docker_version
+
+- name: Show Docker version
+  ansible.builtin.debug:
+    var: docker_version.stdout

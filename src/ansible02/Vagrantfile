@@ -1,0 +1,106 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "ubuntu/jammy64"
+  
+  # Consul Server
+  config.vm.define "consul_server" do |server|
+    server.vm.hostname = "consul-server"
+    server.vm.network "private_network", ip: "192.168.56.11"
+    server.vm.network "forwarded_port", guest: 8500, host: 8500, auto_correct: true
+    
+    server.vm.provider "virtualbox" do |vb|
+      vb.memory = 2048
+      vb.cpus = 1
+    end
+  end
+
+  # API машина
+  config.vm.define "api" do |api|
+    api.vm.hostname = "api"
+    api.vm.network "private_network", ip: "192.168.56.12"
+    api.vm.network "forwarded_port", guest: 8082, host: 8082, auto_correct: true
+    
+    api.vm.provider "virtualbox" do |vb|
+      vb.memory = 2048
+      vb.cpus = 1
+    end
+  end
+
+  # Manager машина
+  config.vm.define "manager" do |manager|
+    manager.vm.hostname = "manager"
+    manager.vm.network "private_network", ip: "192.168.56.13"
+    
+    manager.vm.provider "virtualbox" do |vb|
+      vb.memory = 2048
+      vb.cpus = 1
+    end
+
+    # Rsync синхронизация нескольких папок
+    manager.vm.synced_folder ".", "/vagrant/ansible02", type: "rsync",
+      rsync__auto: true,
+      rsync__verbose: true,
+      rsync__exclude: [".git/", ".vagrant/"]
+    
+    manager.vm.synced_folder "../services", "/vagrant/services", type: "rsync",
+      rsync__auto: true,
+      rsync__verbose: true,
+      rsync__exclude: [".git/", ".vagrant/"]
+    
+    manager.vm.synced_folder "../consul01", "/vagrant/consul01", type: "rsync",
+      rsync__auto: true,
+      rsync__verbose: true,
+      rsync__exclude: [".git/", ".vagrant/"],
+      create: false
+    
+    manager.vm.provision "shell", inline: <<-SHELL
+      echo "Manager машина готова"
+      echo "IP: 192.168.56.13"
+      
+      # Установка Ansible и необходимых пакетов
+      apt-get update
+      apt-get install -y ansible python3-pip sshpass rsync
+      pip3 install python-consul psycopg2-binary
+      
+      # Создаем симлинки для удобства
+      ln -sf /vagrant/ansible02 /home/vagrant/ansible02
+      ln -sf /vagrant/services /home/vagrant/services
+      ln -sf /vagrant/consul01 /home/vagrant/consul01
+      
+      # Проверка установки
+      ansible --version
+      echo "Папки синхронизированы:"
+      ls -la /vagrant/
+    SHELL
+  end
+
+  # DB машина
+  config.vm.define "db" do |db|
+    db.vm.hostname = "db"
+    db.vm.network "private_network", ip: "192.168.56.14"
+    
+    db.vm.provider "virtualbox" do |vb|
+      vb.memory = 2048
+      vb.cpus = 1
+    end
+  end
+  
+  # Общие настройки для всех машин (кроме manager)
+  config.vm.provision "shell", inline: <<-SHELL
+    # Обновление и установка базовых пакетов
+    apt-get update
+    apt-get install -y python3 python3-pip openssh-server curl net-tools
+    
+    # Разрешаем парольный доступ для vagrant пользователя
+    sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/g' /etc/ssh/sshd_config
+    systemctl restart sshd
+    
+    # Устанавливаем пароль для пользователя vagrant
+    echo "vagrant:vagrant" | chpasswd
+    
+    # Отключаем firewall для упрощения
+    ufw disable
+  SHELL
+end

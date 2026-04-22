@@ -1,0 +1,24 @@
+---
+- name: Setup Apache and PostgreSQL on node02
+  hosts: web_servers:database_servers
+  become: yes
+  become_user: root
+  gather_facts: yes
+  roles:
+    - role: apache
+    - role: postgres
+  vars:
+    postgres_version: "14"
+    db_name: "hotel_db"
+    db_user: "hotel_user"
+    db_password: "123"
+
+- name: Deploy microservices application on node01
+  hosts: application_servers
+  become: yes
+  become_user: root
+  gather_facts: yes
+  roles:
+    - role: application
+  vars:
+    ansible_user: vagrant 

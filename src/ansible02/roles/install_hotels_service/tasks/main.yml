@@ -1,0 +1,130 @@
+---
+- name: Установка Java 8 и Maven
+  apt:
+    name: 
+      - openjdk-8-jdk
+      - maven
+    state: present
+    update_cache: yes
+
+- name: Создание директории для сервиса
+  file:
+    path: /opt/hotel-service
+    state: directory
+    owner: vagrant
+    group: vagrant
+    mode: '0755'
+
+- name: Копирование исходного кода сервиса
+  copy:
+    src: /home/vagrant/services/hotel-service/
+    dest: /opt/hotel-service/
+    owner: vagrant
+    group: vagrant
+
+- name: Добавить диалект Hibernate в application.properties
+  lineinfile:
+    path: /opt/hotel-service/src/main/resources/application.properties
+    line: "spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.PostgreSQLDialect"
+    state: present
+
+- name: Сборка проекта (генерация JAR)
+  shell: mvn clean package -DskipTests
+  args:
+    chdir: /opt/hotel-service/
+    creates: /opt/hotel-service/target/hotel-service-0.0.1-SNAPSHOT.jar
+
+- name: Создание файла регистрации сервиса API в Consul
+  copy:
+    dest: /etc/consul.d/api.json
+    owner: consul
+    group: consul
+    content: |
+      {
+        "service": {
+          "name": "api",
+          "port": 8082,
+          "connect": {
+            "sidecar_service": {
+              "proxy": {
+                "upstreams": [
+                  {
+                    "destination_name": "db",
+                    "local_bind_port": 5432
+                  }
+                ]
+              }
+            }
+          },
+          "check": {
+            "name": "API TCP Check",
+            "tcp": "localhost:8082",
+            "interval": "10s",
+            "timeout": "2s"
+          }
+        }
+      }
+
+- name: Перезагрузка Consul
+  systemd:
+    name: consul
+    state: reloaded
+
+- name: Создание systemd юнита для Consul-Envoy (Sidecar для API)
+  copy:
+    dest: /etc/systemd/system/consul-envoy-api.service
+    content: |
+      [Unit]
+      Description=Consul Envoy Sidecar for API
+      After=consul.service
+      Wants=consul.service
+      [Service]
+      ExecStart=/usr/local/bin/consul connect envoy -sidecar-for api
+      Restart=always
+      RestartSec=5
+      User=root
+      [Install]
+      WantedBy=multi-user.target
+
+- name: Запуск сервиса consul-envoy для API
+  systemd:
+    name: consul-envoy-api
+    state: restarted
+    enabled: yes
+    daemon_reload: yes
+
+- name: Создание systemd юнита для Hotel Service
+  copy:
+    dest: /etc/systemd/system/hotel-service.service
+    content: |
+      [Unit]
+      Description=Hotels Service App
+      After=consul-envoy-api.service
+      Requires=consul-envoy-api.service
+
+      [Service]
+      Type=simple
+      User=vagrant
+      WorkingDirectory=/opt/hotel-service
+      # Подключаемся к sidecar-proxy на localhost:5432
+      Environment="POSTGRES_HOST=127.0.0.1"
+      Environment="POSTGRES_PORT=5432"
+      Environment="POSTGRES_DB=hotels_db"
+      Environment="POSTGRES_USER=hotel_user"
+      Environment="POSTGRES_PASSWORD=hotel_password"
+      Environment="SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT=org.hibernate.dialect.PostgreSQLDialect"
+      
+      # Поиск jar файла в папке target и запуск
+      ExecStart=/usr/bin/java -jar /opt/hotel-service/target/hotel-service-0.0.1-SNAPSHOT.jar
+      Restart=on-failure
+      RestartSec=10
+
+      [Install]
+      WantedBy=multi-user.target
+
+- name: Запуск Hotel Service
+  systemd:
+    name: hotel-service
+    state: restarted
+    enabled: yes
+    daemon_reload: yes

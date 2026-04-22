@@ -1,0 +1,83 @@
+---
+- name: Установка зависимостей (unzip)
+  apt:
+    name: unzip
+    state: present
+    update_cache: yes
+
+- name: Создание группы consul
+  group:
+    name: consul
+    state: present
+
+- name: Создание пользователя consul
+  user:
+    name: consul
+    group: consul
+    system: yes
+    shell: /bin/false
+
+- name: Создание необходимых директорий
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: consul
+    group: consul
+    mode: '0755'
+  loop:
+    - /etc/consul.d
+    - /opt/consul
+    - /usr/local/bin
+
+- name: Скачивание Consul
+  get_url:
+    url: https://hashicorp-releases.yandexcloud.net/consul/1.22.3/consul_1.22.3_linux_amd64.zip
+    dest: /tmp/consul.zip
+    timeout: 60
+
+- name: Извлечение Consul
+  unarchive:
+    src: /tmp/consul.zip
+    dest: /usr/local/bin
+    remote_src: yes
+    owner: root
+    group: root
+    mode: '0755'
+    creates: /usr/local/bin/consul
+
+- name: Копирование конфигурации consul_server.hcl
+  copy:
+    src: /home/vagrant/consul01/consul_server.hcl
+    dest: /etc/consul.d/consul.hcl
+    owner: consul
+    group: consul
+    mode: '0644'
+
+- name: Создание systemd юнита для Consul Server
+  copy:
+    dest: /etc/systemd/system/consul.service
+    content: |
+      [Unit]
+      Description="HashiCorp Consul - A service mesh solution"
+      Documentation=https://www.consul.io
+      Requires=network-online.target
+      After=network-online.target
+
+      [Service]
+      User=consul
+      Group=consul
+      ExecStart=/usr/local/bin/consul agent -config-dir=/etc/consul.d/
+      ExecReload=/bin/kill --signal HUP $MAINPID
+      KillMode=process
+      Restart=on-failure
+      LimitNOFILE=65536
+
+      [Install]
+      WantedBy=multi-user.target
+
+- name: Перезагрузка демонов и запуск сервиса consul
+  systemd:
+    name: consul
+    state: restarted
+    enabled: yes
+    daemon_reload: yes

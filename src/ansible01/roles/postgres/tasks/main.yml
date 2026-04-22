@@ -1,0 +1,134 @@
+---
+- name: Update package cache
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+  become: yes
+
+- name: Install PostgreSQL and dependencies
+  apt:
+    name:
+      - postgresql
+      - postgresql-contrib
+      - postgresql-client
+    state: present
+  become: yes
+
+- name: Ensure PostgreSQL service is running and enabled
+  systemd:
+    name: postgresql
+    state: started
+    enabled: yes
+  become: yes
+
+- name: Update PostgreSQL configuration to allow remote connections
+  lineinfile:
+    path: "/etc/postgresql/{{ postgres_version }}/main/postgresql.conf"
+    regexp: "^#?listen_addresses\\s*="
+    line: "listen_addresses = '*'"
+  notify: restart postgresql
+  become: yes
+
+- name: Add password authentication for remote connections
+  lineinfile:
+    path: "/etc/postgresql/{{ postgres_version }}/main/pg_hba.conf"
+    line: "host    all             all             0.0.0.0/0               md5"
+  notify: restart postgresql
+  become: yes
+
+- name: Wait for PostgreSQL to be ready
+  wait_for:
+    port: 5432
+    host: 127.0.0.1
+    delay: 5
+    timeout: 30
+  become: yes
+
+- name: Check if database already exists
+  shell: |
+    sudo -u postgres psql -t -c "SELECT 1 FROM pg_database WHERE datname='{{ db_name }}';"
+  register: db_exists
+  changed_when: false
+  become: yes
+
+- name: Create application database only if it doesn't exist
+  shell: |
+    sudo -u postgres psql -c "CREATE DATABASE {{ db_name }};"
+  when: db_exists.stdout.strip() != "1"
+  become: yes
+
+- name: Check if user already exists
+  shell: |
+    sudo -u postgres psql -t -c "SELECT 1 FROM pg_roles WHERE rolname='{{ db_user }}';"
+  register: user_exists
+  changed_when: false
+  become: yes
+
+- name: Create database user only if it doesn't exist
+  shell: |
+    sudo -u postgres psql -c "CREATE USER {{ db_user }} WITH PASSWORD '{{ db_password }}';"
+  when: user_exists.stdout.strip() != "1"
+  become: yes
+
+- name: Grant privileges to user on database
+  shell: |
+    sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE {{ db_name }} TO {{ db_user }};"
+  become: yes
+
+- name: Check if hotels table exists
+  shell: |
+    sudo -u postgres psql -d {{ db_name }} -t -c "SELECT 1 FROM information_schema.tables WHERE table_name='hotels';"
+  register: table_exists
+  changed_when: false
+  become: yes
+
+- name: Create hotels table only if it doesn't exist
+  shell: |
+    sudo -u postgres psql -d {{ db_name }} -c "
+    CREATE TABLE hotels (
+      id SERIAL PRIMARY KEY,
+      name VARCHAR(100) NOT NULL,
+      location VARCHAR(100) NOT NULL,
+      price_per_night DECIMAL(10,2),
+      available_rooms INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );"
+  when: table_exists.stdout.strip() != "1"
+  become: yes
+
+- name: Check if hotels table has data
+  shell: |
+    sudo -u postgres psql -d {{ db_name }} -t -c "SELECT COUNT(*) FROM hotels;"
+  register: data_exists
+  changed_when: false
+  become: yes
+
+- name: Insert sample data only if table is empty
+  shell: |
+    sudo -u postgres psql -d {{ db_name }} -c "
+    INSERT INTO hotels (name, location, price_per_night, available_rooms) 
+    VALUES 
+      ('Art 4*', 'Kazan', 7500.00, 10),
+      ('Modena Lux', 'Kazan', 5500.00, 15),
+      ('Yamle 4*', 'Kazan', 6800.00, 12),
+      ('Cho', 'Kazan', 3600.00, 18);"
+  when: data_exists.stdout.strip() == "0"
+  become: yes
+
+- name: Configure firewall for PostgreSQL
+  ufw:
+    rule: allow
+    port: '5432'
+    proto: tcp
+  become: yes
+
+- name: Verify database setup
+  shell: |
+    sudo -u postgres psql -d {{ db_name }} -c "SELECT * FROM hotels;"
+  register: db_verify
+  changed_when: false
+  become: yes
+
+- name: Display database verification result
+  debug:
+    var: db_verify.stdout

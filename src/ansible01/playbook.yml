@@ -1,0 +1,88 @@
+---
+- name: Установка Docker и запуск сервисов
+  hosts: node01
+  become: true
+  tasks:
+
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: yes
+        force_apt_get: yes
+
+    - name: Install required dependencies for Docker script
+      ansible.builtin.apt:
+        name:
+          - python3-pip
+          - python3-venv
+          - curl
+          - gnupg
+          - apt-transport-https
+          - ca-certificates
+          - software-properties-common
+        state: present
+
+    - name: Install Docker using official script
+      ansible.builtin.shell:
+        cmd: |
+          curl -fsSL https://get.docker.com -o get-docker.sh
+          sh get-docker.sh
+      args:
+        creates: /usr/bin/docker
+
+    - name: Install Docker Compose plugin
+      ansible.builtin.apt:
+        name: docker-compose-plugin
+        state: present
+      ignore_errors: yes
+
+    - name: Add user to docker group
+      ansible.builtin.user:
+        name: "{{ ansible_user }}"
+        groups: docker
+        append: yes
+
+    - name: Start and enable Docker service
+      ansible.builtin.service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Install Docker Python SDK
+      ansible.builtin.pip:
+        name: docker
+        state: present
+
+    - name: Verify Docker installation
+      ansible.builtin.shell:
+        cmd: docker --version
+      register: docker_version
+
+    - name: Show Docker version
+      ansible.builtin.debug:
+        var: docker_version.stdout
+        
+    - name: Синхронизация директрии src с машины-контроллера на удаленную
+      ansible.builtin.synchronize:
+        src: /vagrant/
+        dest: /vagrant/
+        recursive: yes
+        delete: yes
+        checksum: yes
+    
+    - name: Копирование docker-compose.yml
+      ansible.builtin.copy:
+        src: /vagrant/services/docker-compose.yml
+        dest: /vagrant/services/docker-compose.yml
+
+    - name: Сборка образов и запуск с docker-compose
+      community.docker.docker_compose_v2:
+        project_src: "/vagrant/services/"
+        build: policy
+  handlers:
+    - name: reboot machine
+      ansible.builtin.reboot:
+        msg: "Restart machine with ansible"
+        pre_reboot_delay: 10
+        post_reboot_delay: 30
+        reboot_timeout: 300
+        test_command: whoami

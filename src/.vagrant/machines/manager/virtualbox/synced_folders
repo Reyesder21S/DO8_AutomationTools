@@ -1,0 +1,1 @@
+{"virtualbox":{},"rsync":{"/vagrant":{"type":"rsync","rsync__auto":true,"rsync__verbose":true,"rsync__exclude":[".git/",".vagrant/"],"guestpath":"/vagrant","hostpath":"/home/reyesder/Рабочий стол/DO8_AutomationTools.ID_1220167-1/src","disabled":false,"__vagrantfile":true,"auto":true,"verbose":true,"exclude":[".git/",".vagrant/"],"owner":"vagrant","group":"vagrant"}}}

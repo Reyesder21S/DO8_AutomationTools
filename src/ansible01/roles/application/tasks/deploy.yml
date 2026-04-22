@@ -1,0 +1,58 @@
+---
+- name: Create application directory
+  file:
+    path: /opt/microservices
+    state: directory
+    owner: vagrant
+    group: vagrant
+    mode: '0755'
+  become: yes
+
+- name: Copy simple docker-compose without builds
+  copy:
+    src: docker-compose.yml
+    dest: /opt/microservices/docker-compose.yml
+    owner: vagrant
+    group: vagrant
+    mode: '0644'
+  become: yes
+
+- name: Copy services directory recursively
+  synchronize:
+    src: /vagrant/services/
+    dest: /opt/microservices/
+    recursive: yes
+    owner: yes
+    group: yes
+    perms: yes
+  become: yes
+
+- name: Build images and run with Docker Compose V2
+  community.docker.docker_compose_v2:
+    project_src: "/opt/microservices/"
+    build: always
+    state: present
+  become: yes
+  become_user: vagrant
+
+- name: Wait for services to be ready
+  wait_for:
+    port: "{{ item }}"
+    host: 127.0.0.1
+    delay: 5
+    timeout: 60
+  loop:
+    - 8081
+    - 8087
+  become: yes
+
+- name: Check running containers
+  command: docker ps
+  register: docker_ps
+  changed_when: false
+  become: yes
+
+- name: Display running containers
+  debug:
+    var: docker_ps.stdout_lines
+

@@ -1,0 +1,24 @@
+---
+- name: Install and run Consul Server
+  hosts: consul_server
+  become: yes
+  roles:
+    - role: install_consul_server
+
+- name: Install Consul Client and Envoy Proxy
+  hosts: [api, db]
+  become: yes
+  roles:
+    - role: install_consul_client
+
+- name: Install and run db (Postgres)
+  hosts: db
+  become: yes
+  roles:
+    - role: install_db
+
+- name: Install and run Hotel Service
+  hosts: api
+  become: yes
+  roles:
+    - role: install_hotels_service
